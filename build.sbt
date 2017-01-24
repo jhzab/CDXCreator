@@ -23,6 +23,8 @@ scalacOptions ++= Seq(
   "-Ywarn-unused-import" // 2.11 only
 )
 
+resolvers ++= Seq("internetarchive" at "http://builds.archive.org/maven2")
+
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % "2.1.0",
   "org.apache.spark" %% "spark-sql" % "2.1.0",
@@ -30,6 +32,7 @@ libraryDependencies ++= Seq(
   "com.github.scopt" %% "scopt" % "3.5.0",
   "org.typelevel" %% "cats" % "0.9.0",
   "commons-io" % "commons-io" % "2.5",
+  "de.l3s" % "hadoop-concat-gz" % "1.0-SNAPSHOT",
   "org.scalatest" %% "scalatest" % "3.0.1" % "test"
 )
 
