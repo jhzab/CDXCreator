@@ -1,0 +1,9 @@
+# CDXCreator
+
+CDXCreator is a Spark application that creates CDX files from (W)ARC files.
+
+It expects to be run under Spark and receives two arguments: '--input' and
+'--output'. The former can also be a glob. Output is written in a "CSV" format
+with " " as the seperator. The output filenames are random.
+
+The files currently **don't** have a CDX header.
