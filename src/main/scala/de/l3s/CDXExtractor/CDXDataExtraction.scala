@@ -10,7 +10,7 @@ import java.security.{DigestInputStream, MessageDigest}
 
 import org.apache.commons.io.IOUtils
 import org.apache.hadoop.io.Text
-import org.archive.format.http.HttpResponseParser
+import org.archive.format.http.{HttpHeaders, HttpResponse, HttpResponseParser}
 import org.archive.io.{ArchiveRecord, ArchiveRecordHeader}
 import org.archive.util.{Base32, SURT}
 import cats._
@@ -32,10 +32,10 @@ object CDXDataExtraction {
       stream: FileBackedBytesWritable): Either[String, CDXRecord] = {
     val is = stream.getBytes.openBufferedStream()
     /* Copy the GZIP stream into memory to check it's size */
-    /* TODO: use a counting InputStream to read data only once */
+    /* TODO: use a counting InputStream to read data only once,
+     * OTOH this would also require to change the CDX object later on. */
     val data = IOUtils.toByteArray(is)
     val gzipSize = data.length
-    // println(s"${text.toString} - ${is.available} - $gzipSize")
 
     for {
       /* Worst case is that a 1GB WARC file with ONE page gets copied into memory */
@@ -45,42 +45,33 @@ object CDXDataExtraction {
           e match {
             /* TODO: find out why some inputs result in a EOFException some others don't (even on EOF) */
             case e: EOFException =>
-              e.printStackTrace
+              //e.printStackTrace()
               "Encountered end of file."
             case e: Exception =>
-              e.printStackTrace
+              //e.printStackTrace()
               e.getMessage
             case _ => "Could not match exception"
           }
         }
-      digIS <- ioStreamToDigestStream(gzip)
       fileOffset <- textToNameAndOffset(text)
-      archiveRecord <- streamToArchiveRecord(fileOffset, digIS)
-      cdx <- getCDXFromWARC(archiveRecord, digIS, fileOffset, gzipSize)
+      archiveRecord <- streamToArchiveRecord(fileOffset, gzip)
+      cdx <- getCDXFromWARC(archiveRecord, fileOffset, gzipSize)
     } yield cdx
   }
 
-  private[this] def getHeaderValue(httpHeaders: java.util.Map[String, String],
-                                   key: String): Option[String] = {
-    val value: String = httpHeaders.get(key)
-    if (value != null)
-      Option(value)
-    else None
-  }
-
-  private[this] def getHttpStatus(is: InputStream): Either[String, String] = {
+  private[this] def getHttpReponse(is: InputStream): Either[String, HttpResponse] = {
     Either.catchNonFatal {
       val parser = new HttpResponseParser()
-      val httpResponse = parser.parse(is)
-      httpResponse.getMessage.getStatus.toString
+      parser.parse(is)
+    }.leftMap(e => s"Could not extract http reponse: ${e.getMessage}")
+  }
+
+  private[this] def getHttpStatus(hR: HttpResponse): Either[String, Int] = {
+    Either.catchNonFatal {
+        hR.getMessage.getStatus
     }.leftMap(e => s"Could not extract http status code: ${e.getMessage}")
   }
-  /*
-  private[this] def getFromRecordHeader[T](recordHeader: ArchiveRecordHeader)(f: ArchiveRecordHeader => T): Either[String, T] = {
-    Either
-      .catchNonFatal(f(recordHeader))
-  }
-   */
+
   private[this] def getMimeType(
       recordHeader: ArchiveRecordHeader): Either[String, String] =
     Either
@@ -94,20 +85,27 @@ object CDXDataExtraction {
       .catchNonFatal(recordHeader.getDate)
       .leftMap(e => s"Could not extract date: ${e.getMessage}")
 
-  private[this] def getChecksum(aR: ArchiveRecord, is: DigestInputStream): Either[String, String] = {
+  private[this] def getChecksum(is: InputStream): Either[String, String] = {
+    val digIS = new DigestInputStream(is, MessageDigest.getInstance("sha1"))
+
     Either.catchNonFatal {
-      try {
-        while (aR.read() != -1) ()
-      } catch {
-        case e: IOException => /* Ignore Stream is closed IOException */
-      }
-      val digest = is.getMessageDigest.digest()
+      while (digIS.read() != -1) ()
+      val digest = digIS.getMessageDigest.digest()
       Base32.encode(digest)
-    }.leftMap(e => e.getMessage + "1")
+    }.leftMap(e => e.getMessage)
+  }
+
+  private[this] def getRedirect(httpHeaders: HttpHeaders): Either[String, String] = {
+    Either.catchNonFatal {
+      val locationHeader = httpHeaders.get("Location")
+      if (locationHeader != null) {
+        locationHeader.getValue
+      } else
+        "-"
+    }.leftMap(e => s"Error accessing Location header: ${e.getMessage}")
   }
 
   def getCDXFromWARC(aR: ArchiveRecord,
-                     digIS: DigestInputStream,
                      fO: FileOffset,
                      compressedSize: Int): Either[String, CDXRecord] = {
     /* can't fail */
@@ -119,20 +117,20 @@ object CDXDataExtraction {
 
     /* might fail */
     val canonizedUrl = SURT.fromURI(url).replace("http://(", "")
-    val redirect = "-"
-    val digLocal = new DigestInputStream(aR, MessageDigest.getInstance("sha1"))
 
     for {
       date <- getDate(archiveHeader)
       mimeType <- getMimeType(archiveHeader)
-      responseCode <- getHttpStatus(digLocal)
-      checksum <- getChecksum(aR, digLocal)
+      httpResponse <- getHttpReponse(aR)
+      responseCode <- getHttpStatus(httpResponse)
+      redirect <- getRedirect(httpResponse.getHeaders)
+      checksum <- getChecksum(aR)
     } yield
       CDXRecord(canonizedUrl,
                 date,
                 url,
                 mimeType,
-                responseCode,
+                responseCode.toString,
                 checksum,
                 redirect,
                 metaTags,
