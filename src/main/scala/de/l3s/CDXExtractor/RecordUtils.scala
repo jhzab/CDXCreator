@@ -33,8 +33,9 @@ object RecordUtils {
       val atBeginning = if (fileOffset.offset == 0) true else false
       val archiveReader =
         ArchiveReaderFactory.get(fileOffset.fileName, stream, atBeginning)
+      archiveReader.setDigest(true)
       val record = archiveReader.get()
-      archiveReader.close()
+      //archiveReader.close()
       record
     }.leftMap(t => t.getMessage)
   }
