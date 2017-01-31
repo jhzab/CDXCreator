@@ -6,7 +6,7 @@ import de.l3s.CDXExtractor.data.CDXExtractorArguments
 import de.l3s.concatgz.io.{ConcatGzipInputFormat, FileBackedBytesWritable}
 import org.apache.hadoop.io.Text
 
-package object CDXExtractor {
+object CDXExtractor {
   def parseArguments(args: Array[String]): Option[CDXExtractorArguments] = {
     val parser =
       new scopt.OptionParser[CDXExtractorArguments]("CDXExtractor") {
@@ -35,7 +35,8 @@ package object CDXExtractor {
       .map {
         case (text, stream) =>
           getCDXFromTextAndStream(text, stream)
-    }.coalesce(7000)
+      }
+      .coalesce(7000)
 
     /*
     val errors = warcRecords.collect{ case Left(error) => error}.toDS
@@ -46,13 +47,11 @@ package object CDXExtractor {
       System.err.println(s"First few errors: ")
       errors.head(20).foreach(e => System.err.println("Error: " + e))
     }
-    */
+     */
 
     val validWarcRecords = warcRecords.collect { case Right(cdx) => cdx }.toDS
 
-    validWarcRecords.write
-      .option("sep", " ")
-      .csv(config.output)
+    validWarcRecords.write.option("sep", " ").csv(config.output)
   }
 
   def main(args: Array[String]): Unit = {

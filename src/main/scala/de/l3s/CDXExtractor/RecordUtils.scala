@@ -4,8 +4,6 @@ import de.l3s.CDXExtractor.data.FileOffset
 import java.io.InputStream
 import org.apache.hadoop.io.Text
 import org.archive.io.{ArchiveReaderFactory, ArchiveRecord}
-import cats._
-import cats.data._
 import cats.implicits._
 
 object RecordUtils {
@@ -33,7 +31,6 @@ object RecordUtils {
       val atBeginning = if (fileOffset.offset == 0) true else false
       val archiveReader =
         ArchiveReaderFactory.get(fileOffset.fileName, stream, atBeginning)
-      //archiveReader.setDigest(true)
       archiveReader.get()
     }.leftMap(t => t.getMessage)
   }
