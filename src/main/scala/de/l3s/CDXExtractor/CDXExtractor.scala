@@ -35,8 +35,9 @@ package object CDXExtractor {
       .map {
         case (text, stream) =>
           getCDXFromTextAndStream(text, stream)
-    }.cache
+    }.coalesce(7000)
 
+    /*
     val errors = warcRecords.collect{ case Left(error) => error}.toDS
     val errorCount = errors.count
 
@@ -45,12 +46,9 @@ package object CDXExtractor {
       System.err.println(s"First few errors: ")
       errors.head(20).foreach(e => System.err.println("Error: " + e))
     }
+    */
 
-    val validWarcRecords = warcRecords.collect { case Right(cdx) => cdx }.toDS.cache
-    warcRecords.unpersist(true)
-
-    val numValidWarcRecords = validWarcRecords.count
-    System.err.println(s"Found $numValidWarcRecords valid WARC records.")
+    val validWarcRecords = warcRecords.collect { case Right(cdx) => cdx }.toDS
 
     validWarcRecords.write
       .option("sep", " ")
