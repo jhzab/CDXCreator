@@ -18,45 +18,30 @@ import cats.data._
 import cats.implicits._
 
 object CDXDataExtraction {
-  def ioStreamToDigestStream(is: InputStream): Either[String, DigestInputStream] = {
-    Either.catchNonFatal(new DigestInputStream(is,
-      MessageDigest.getInstance("sha1"))).leftMap{
-      /* Ignore IO errors while reading the stream */
-      case e: java.io.IOException => ""
-      case t: Throwable => t.getMessage
+  def getArrayFromStream(is: InputStream): Either[String, Array[Byte]] = {
+    Either.catchNonFatal(IOUtils.toByteArray(is)).leftMap { e =>
+      e.printStackTrace()
+      e.getMessage
     }
   }
 
   def getCDXFromTextAndStream(
       text: Text,
       stream: FileBackedBytesWritable): Either[String, CDXRecord] = {
-    val is = stream.getBytes.openBufferedStream()
-    /* Copy the GZIP stream into memory to check it's size */
-    /* TODO: use a counting InputStream to read data only once,
-     * OTOH this would also require to change the CDX object later on. */
-    val data = IOUtils.toByteArray(is)
-    val gzipSize = data.length
-
-    for {
-      /* Worst case is that a 1GB WARC file with ONE page gets copied into memory */
-      gzip <- Either
-        .catchNonFatal(new GZIPInputStream(new ByteArrayInputStream(data)))
-        .leftMap { e =>
-          e match {
-            /* TODO: find out why some inputs result in a EOFException some others don't (even on EOF) */
-            case e: EOFException =>
-              //e.printStackTrace()
-              "Encountered end of file."
-            case e: Exception =>
-              //e.printStackTrace()
-              e.getMessage
-            case _ => "Could not match exception"
-          }
-        }
-      fileOffset <- textToNameAndOffset(text)
-      archiveRecord <- streamToArchiveRecord(fileOffset, gzip)
-      cdx <- getCDXFromWARC(archiveRecord, fileOffset, gzipSize)
-    } yield cdx
+      val is = stream.getBytes.openBufferedStream()
+      /* Copy the GZIP stream into memory to check it's size */
+      /* TODO: use a counting InputStream to read data only once,
+       * OTOH this would also require to change the CDX object later on. */
+      for {
+        data <- getArrayFromStream(is)
+        /* Worst case is that a 1GB WARC file with ONE page gets copied into memory */
+        gzip <- Either
+          .catchNonFatal(new GZIPInputStream(new ByteArrayInputStream(data)))
+          .leftMap(t => t.getMessage)
+        fileOffset <- textToNameAndOffset(text)
+        archiveRecord <- streamToArchiveRecord(fileOffset, gzip)
+        cdx <- getCDXFromWARC(archiveRecord, fileOffset, data.length)
+      } yield cdx
   }
 
   private[this] def getHttpReponse(is: InputStream): Either[String, HttpResponse] = {
@@ -105,28 +90,43 @@ object CDXDataExtraction {
     }.leftMap(e => s"Error accessing Location header: ${e.getMessage}")
   }
 
+  private[this] def getArchiveHeader(aR: ArchiveRecord): Either[String, ArchiveRecordHeader] = {
+      val header = aR.getHeader
+
+    if (header == null)
+      Left("Could not extract header for record")
+    else
+      Right(header)
+  }
+
+  private[this] def getUrl(header: ArchiveRecordHeader): Either[String, String] = {
+    val url = header.getUrl
+
+    if (url == null)
+      Left("Could not extract url from archive record header")
+    else
+      Right(url)
+  }
+
   def getCDXFromWARC(aR: ArchiveRecord,
                      fO: FileOffset,
                      compressedSize: Int): Either[String, CDXRecord] = {
     /* can't fail */
     val offset = fO.offset
     val fileName = fO.fileName
-    val archiveHeader = aR.getHeader
-    val url = archiveHeader.getUrl
     val metaTags = "-"
 
-    /* might fail */
-    val canonizedUrl = SURT.fromURI(url).replace("http://(", "")
-
     for {
+      archiveHeader <- getArchiveHeader(aR)
+      url <- getUrl(archiveHeader)
       date <- getDate(archiveHeader)
-      mimeType <- getMimeType(archiveHeader)
+      mimeType <-   getMimeType(archiveHeader)
       httpResponse <- getHttpReponse(aR)
       responseCode <- getHttpStatus(httpResponse)
       redirect <- getRedirect(httpResponse.getHeaders)
       checksum <- getChecksum(aR)
     } yield
-      CDXRecord(canonizedUrl,
+      CDXRecord(SURT.fromURI(url).replace("http://(", ""),
                 date,
                 url,
                 mimeType,
